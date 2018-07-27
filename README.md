@@ -12,10 +12,10 @@ and ***welcome your constructive criticism***.  Of particular concern:
 ViewModels.
 
 2. I would like to create a <final-el> VM to handle grid cell properties rather than
-rely on indexes in my element ID's.  For more detail see "todo: <final-el>" in index.html.
+rely on indexes in my element ID's.  For more detail see `todo: <final-el>` in index.html.
 
 3. I want to play a sound effect when the user hovers over a grid cell, but so far
 the sound lags so far behind the visual display that this degrades rather than
-improves the user experience (see "todo: address lag" in index.html).
+improves the user experience (see `todo: address lag` in index.html).
 
 Thanks for looking!
