@@ -1,5 +1,6 @@
 # CanJS-ColorChooser
 Simple Web Color Chooser to Demonstrate CanJS Capabilities
+
 (CanJS information is found at http://canjs.com)
 
 This web app is running at http://colors.code-read.com.
