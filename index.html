@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CanJS Color Chooser 5</title>
+    <style>
+
+        :root {
+            --grid-cell-size: 20px;     /* default for very small screens (otherwise undefined) */
+            font-family: sans-serif;
+            --bgcolor: lightgray;
+            background-color: var(--bgcolor);
+        }
+
+        /* Scale our grid sizes to user's screen width */
+        @media (min-width: 490px) {  :root {--grid-cell-size: 25px;}  }
+        @media (min-width: 600px) {  :root {--grid-cell-size: 30px;}  }
+        @media (min-width: 800px) {  :root {--grid-cell-size: 40px;}  }
+        @media (min-width: 1000px) {  :root {--grid-cell-size: 50px;}  }
+        @media (min-width: 1200px) {  :root {--grid-cell-size: 60px;}  }
+
+        body {margin: 10px;}
+
+        h1 {text-align: center;}
+
+        base-grid {
+            display: grid;
+            grid-template-columns: repeat(19, var(--grid-cell-size));
+        }
+
+        final-grid {
+            display: inline-grid;
+            grid-template-columns: repeat(7, var(--grid-cell-size)); /* best w/odd number */
+        }
+
+        readout-grid {
+            display: inline-grid;
+            grid-template-columns: repeat(3, calc(var(--grid-cell-size) * 4));
+            height: calc(var(--grid-cell-size) * 6);
+            max-width: 70px; /* scroll screen instead of wrapping beneath elements to my left */
+        }
+
+        base-el, final-el {
+            font-size: calc(var(--grid-cell-size) / 4);
+            line-height: calc(var(--grid-cell-size) / 4);
+            /*border-radius: calc(var(--grid-cell-size) / 8); causes lockups (performance) */
+            height: calc(var(--grid-cell-size) / 1.1);
+            display: block;
+            color: white;
+            border-color: var(--bgcolor);
+            border-style: solid;
+            border-width: 2px;
+            cursor: pointer;
+            padding-left: calc(var(--grid-cell-size) / 20);
+            padding-top: calc(var(--grid-cell-size) / 20);
+        }
+
+        @keyframes blink {
+            0% {border: 2px solid white;}
+            100% {border: 2px solid black;}
+        }
+
+        /* Highlight a selected cell */
+        .selected {
+            animation: blink .6s step-start infinite alternate;
+            animation-timing-function: ease-in-out;
+            /*todo: causes lockup w/Chrome ("mousehandler timeout?") */
+            /*transform: skewY(-20deg);*/
+        }
+
+        .notSelected {
+        }
+
+        button {
+            width: 100px;
+            height: 70px;
+            align-self: center;
+            cursor: pointer;
+            border: 3px solid gray;
+        }
+
+        button:hover,
+        button:focus {
+            background: white;
+        }
+
+    </style>
+</head>
+<body>
+<audio preload="auto" id="hoverSound">
+    <source src="click1a.ogg" type="audio/ogg">
+    <source src="click1a.mp3" type="audio/mpeg">
+    Your browser does not support the audio element.
+</audio>
+<h1>CanJS Color Chooser</h1>
+<b>Click to lock Base Color:</b>
+<base-status></base-status>
+<base-grid id="baseColors"></base-grid>
+<br>
+<b>Click to lock Final Color:</b>
+<final-status></final-status>
+<br>
+<final-grid id="finalColors"></final-grid>
+<readout-grid></readout-grid>
+
+
+<!--Most variables not shown in browser debugger w/script type module:-->
+<!--<script type="module">
+    import {Component, DefineMap} from "https://unpkg.com/can@5/core.mjs";-->
+
+<!--<script src="https://unpkg.com/can@5/dist/global/core.js"></script>-->
+<script src="https://unpkg.com/can/dist/global/core.js"></script>
+<script>
+
+    // todo: address lag; sound is async to screen updates which degrades UX.
+    let hoverSound = document.getElementById("hoverSound");
+    hoverSound.volume = 0.6;
+
+    function makeSound() {
+        hoverSound.play();
+    }
+
+    // Shared amongst several ViewModels:
+    let cpGlobals = new can.DefineMap({
+
+        baseRed: 127,       // Current "base" color strip selection
+        baseGrn: 127,
+        baseBlu: 127,
+
+        finalRed: 127,      // Current "final color" selection
+        finalGrn: 127,
+        finalBlu: 127,
+
+        readoutRed: 127,    // Current color shown in "readout"
+        readoutGrn: 127,
+        readoutBlu: 127,
+
+        baseElId: "127.127.127",    // Element ID's do "double duty" by storing their colors
+        baseLock: false,            // User clicked a base element so don't animate on hover
+
+        finalElId: "127.127.127",
+
+        finalLock: false,           // Final choice "locked" by clicking.
+                                    // todo: why is this reliable but global var "finalLock" isn't?
+    });
+
+    ///////////// STATUS FIELDS ////////////////
+
+    can.Component.extend({
+        tag: "base-status",
+        view: `<span style="color: white; background-color: rgb({{curColors}});">{{curColors}}</span>`,
+        ViewModel: {
+            get curColors() {
+                return `${cpGlobals.baseRed},${cpGlobals.baseGrn},${cpGlobals.baseBlu}`;
+            }
+        }
+    });
+
+    can.Component.extend({
+        tag: "final-status",
+        view: `<span style="color: {{textColor}}; background-color: rgb({{curColors}});">{{curColors}}</span>`,
+        ViewModel: {
+            get textColor() {
+                if (cpGlobals.finalRed + cpGlobals.finalGrn + cpGlobals.finalBlu > 400)
+                    return "black";
+                else
+                    return "white"
+            },
+            get curColors() {
+                return `${cpGlobals.finalRed},${cpGlobals.finalGrn},${cpGlobals.finalBlu}`;
+            }
+        }
+    });
+
+    ///////////// READOUT AND COPY BUTTONS ////////////////
+
+    can.Component.extend({
+        tag: "readout-grid",
+        view: `<span style="text-align: right; padding: 6px"><b>Final<br>Color:</b></span>`
+        + `<span style="color: {{textColor}}; padding: 12px; border: 3px solid gray; background-color: `
+        + `rgb({{readoutRed}}, {{readoutGrn}}, {{readoutBlu}}); ">`
+        + `R:{{readoutRed}}<br>G:{{readoutGrn}}<br>B:{{readoutBlu}}</span>`
+        + `<span style="padding: 12px">{{#if(clipCopied)}}<b>{{clipCopied}}</b> copied to clipboard.{{/if}}</span>`
+        + `<span></span>`
+        + `<button on:click="copyToClip('{{readoutRGB}}')">Copy <b>{{readoutRGB}}</b> to clipboard</button>`
+        + `<button on:click="copyToClip('{{readoutHex}}')">Copy <b>{{readoutHex}}</b> to clipboard</button>`,
+
+        ViewModel: {
+            clipCopied: {
+                default: ""
+            },
+            copyToClip(toCopy) {
+                var textArea = document.createElement("textarea");
+                textArea.value = toCopy;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand("Copy");
+                textArea.remove();
+                this.clipCopied = `${toCopy}`;
+            },
+            // Force readout to track selection from "final-grid" VM:
+            updateGlobals() {
+                if (!cpGlobals.finalLock) {
+                    cpGlobals.readoutRed = cpGlobals.finalRed;
+                    cpGlobals.readoutGrn = cpGlobals.finalGrn;
+                    cpGlobals.readoutBlu = cpGlobals.finalBlu;
+                }
+            },
+            get textColor() {
+                if (cpGlobals.readoutRed + cpGlobals.readoutGrn + cpGlobals.readoutBlu > 400)
+                    return "black";
+                else
+                    return "white"
+            },
+            get readoutRed() {
+                this.updateGlobals();
+                return cpGlobals.readoutRed;
+            },
+            get readoutGrn() {
+                this.updateGlobals();
+                return cpGlobals.readoutGrn;
+            },
+            get readoutBlu() {
+                this.updateGlobals();
+                return cpGlobals.readoutBlu;
+            },
+            get readoutRGB() {
+                this.updateGlobals();
+                return `${cpGlobals.readoutRed},${cpGlobals.readoutGrn},${cpGlobals.readoutBlu}`;
+            },
+            get readoutHex() {
+                this.updateGlobals();
+                return `#${cpGlobals.readoutRed.toString(16).padStart(2, "0")}`
+                    + `${cpGlobals.readoutGrn.toString(16).padStart(2, "0")}`
+                    + `${cpGlobals.readoutBlu.toString(16).padStart(2, "0")}`;
+            },
+        }
+    });
+
+    ///////////// BASE COLOR CHOOSER ////////////////
+
+    // Derive grid size from CSS:
+    const baseStyle = window.getComputedStyle(document.getElementById("baseColors"));
+    const baseSpec = baseStyle.getPropertyValue("grid-template-columns");
+    const baseCols = baseSpec.split(/ /).length - 1;
+
+    let baseItems = "";
+    let redLev = 255;
+    let greenLev = 255;
+    let blueLev = 255;
+
+    // Base rainbow grid.  Math derived from https://krazydad.com/tutorials/makecolors.php:
+    const sinFreq = .3;
+    const greenPhase = 2 * Math.PI / 3;
+    const bluePhase = 4 * Math.PI / 3;
+    const sineWidth = 127;
+    const sineCtr = 128;
+    for (let j = 0; j < baseCols; ++j) {
+        redLev = Math.round(Math.sin(sinFreq * j + 0) * sineWidth + sineCtr);
+        greenLev = Math.round(Math.sin(sinFreq * j + greenPhase) * sineWidth + sineCtr);
+        blueLev = Math.round(Math.sin(sinFreq * j + bluePhase) * sineWidth + sineCtr);
+        baseItems += `<base-el id="${redLev}.${greenLev}.${blueLev}" `
+            + `style="background-color: rgb(${redLev},${greenLev},${blueLev});" `
+            + `class="{{isSelected('${redLev}.${greenLev}.${blueLev}')}}"> `
+            + `R:${redLev}<br>G:${greenLev}<br>B:${blueLev}</base-el>`;
+    }
+
+    // Add gray square:
+    baseItems += `<base-el id="127.127.127" `
+        + `style="background-color: rgb(127,127,127);" `
+        + `class="{{isSelected('127.127.127')}}"> `
+        + `R:127<br>G:127<br>B:127</base-el>`;
+
+    can.Component.extend({
+        tag: "base-grid",
+        view: baseItems,
+        ViewModel: {
+            isSelected: function (elID) {
+                if (elID == cpGlobals.baseElId)
+                    return "selected";
+                else
+                    return "notSelected";
+            }
+        },
+        events: {
+            mouseover: function (componentElement, mouseoverEvent) {
+                cpGlobals.finalElId = "undef";
+                if (!cpGlobals.baseLock) {
+                    // Move "selected" indicator to this grid cell:
+                    // cpGlobals.baseElId = mouseoverEvent.srcElement.id; FireFox n/g
+                    cpGlobals.baseElId = mouseoverEvent.target.id;
+                    [cpGlobals.baseRed, cpGlobals.baseGrn, cpGlobals.baseBlu]
+                        // = mouseoverEvent.srcElement.id.split(".");
+                        = mouseoverEvent.target.id.split(".");
+                }
+                // makeSound(); detracts b/c not real-time
+            },
+            click: function (componentElement, clickEvent) {
+                cpGlobals.baseLock = !cpGlobals.baseLock;
+                cpGlobals.baseElId = clickEvent.target.id;
+
+                // Release any existing "final" choice:
+                cpGlobals.finalElId = "undef";
+                cpGlobals.finalLock = false;
+
+                // Retrieve color of clicked element from its ID:
+                [cpGlobals.baseRed, cpGlobals.baseGrn, cpGlobals.baseBlu]
+                    = clickEvent.target.id.split(".");
+
+                // Initialize "final" choice to "base" choice:
+                cpGlobals.finalRed = cpGlobals.baseRed;
+                cpGlobals.finalGrn = cpGlobals.baseGrn;
+                cpGlobals.finalBlu = cpGlobals.baseBlu;
+
+            },
+        }
+    });
+
+    ///////////// FINAL COLOR CHOOSER ////////////////
+
+    // Derive grid size from CSS:
+    const finalStyle = window.getComputedStyle(document.getElementById("finalColors"));
+    const finalSpec = finalStyle.getPropertyValue("grid-template-columns");
+    const finalCols = finalSpec.split(/ /).length;
+
+    // todo: <final-el> defined (rather than <div>) b/c I want to create a <final-el> VM
+    // ..to handle grid cell properties rather than need to index each cellBgColor()
+    // ..function call.  However, can't find a way to have CanJS "find" stache properties
+    // ..when my custom element is already contained in an outer scope VM (<final-grid>) here:
+    //
+    let finalItems = "";
+    for (let i = 0; i < finalCols; i++) {
+        for (let j = 0; j < finalCols; j++) {
+            finalItems += `<final-el id="${i}.${j}" `
+                + `class="{{isSelected(${i}.${j})}}" `
+                + `style="color: {{cellFgColor(${i},${j})}}; background-color: rgb({{cellBgColor('Red',${i},${j})}},{{cellBgColor('Grn',${i},${j})}},{{cellBgColor('Blu',${i},${j})}})">`
+                + `R:{{cellBgColor('Red',${i},${j})}}<br>G:{{cellBgColor('Grn',${i},${j})}}<br>B:{{cellBgColor('Blu',${i},${j})}}</final-el>`;
+        }
+    }
+
+    // "Final" grid colors range dynamically to colors centered on "base" color selection:
+    //
+    let finalCenter = (finalCols - finalCols % 2) / 2;
+
+    can.Component.extend({
+        tag: "final-grid",
+        view: finalItems,
+        ViewModel: {
+            isSelected: function (elID) {
+                if (elID == cpGlobals.finalElId)
+                    return "selected";
+                else
+                    return "notSelected";
+            },
+
+            cellBgColor: function (color, elY, elX) {
+                let xOffset = finalCenter - elX;    // How far am I from grid center?
+                let yOffset = finalCenter - elY;
+                let retVal;
+                switch (color) {
+                    case "Red":
+                        retVal = Number(cpGlobals.baseRed) + xOffset * 19 + yOffset * 43;
+                        break;
+                    case "Grn":
+                        retVal = Number(cpGlobals.baseGrn) + xOffset * 19 + yOffset * 43;
+                        break;
+                    case "Blu":
+                        retVal = Number(cpGlobals.baseBlu) + xOffset * 19 + yOffset * 43;
+                        break;
+                }
+                retVal = retVal > 255 ? 255 : retVal;
+                return retVal < 1 ? 0 : retVal;
+            },
+
+            cellFgColor: function (elY, elX) {
+                let itemRed = this.cellBgColor('Red', elY, elX);
+                let itemGrn = this.cellBgColor('Grn', elY, elX);
+                let itemBlu = this.cellBgColor('Blu', elY, elX);
+                if (itemRed + itemGrn + itemBlu > 400)
+                    return "black";
+                else
+                    return "white";
+            }
+        },
+        events: {
+            mouseover: function (componentElement, mouseoverEvent) {
+                if (!cpGlobals.finalLock)
+                    cpGlobals.finalElId = mouseoverEvent.target.id;
+
+                let [hovY, hovX] = mouseoverEvent.target.id.split(".");
+                cpGlobals.finalRed = this.viewModel.cellBgColor("Red", hovY, hovX);
+                cpGlobals.finalGrn = this.viewModel.cellBgColor("Grn", hovY, hovX);
+                cpGlobals.finalBlu = this.viewModel.cellBgColor("Blu", hovY, hovX);
+                // makeSound(); detracts from UX due to lag
+            },
+            click: function (componentElement, clickEvent) {
+                cpGlobals.finalLock = !cpGlobals.finalLock;
+                cpGlobals.finalElId = clickEvent.target.id;
+            },
+        }
+    });
+
+</script>
+</body>
+</html>
